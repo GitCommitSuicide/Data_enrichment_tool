@@ -20,6 +20,7 @@ from scripts.config import OLLAMA_URL, OLLAMA_MODEL
 from scripts.extractor import check_ollama, extract
 from scripts.search import gather
 from scripts.cleaner import clean_output
+from scripts.validator import validate_all_people
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -219,6 +220,12 @@ def main() -> None:
 
     # Merge people results back into working copy
     extracted_with_people = _merge_people_into_data(copy.deepcopy(extracted_data), people_data)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # STEP 3.5 — LinkedIn cross-validation
+    # ─────────────────────────────────────────────────────────────────────────
+    print(f"\n{'─'*60}\nSTEP 3.5 — LinkedIn validation\n{'─'*60}")
+    extracted_with_people = validate_all_people(extracted_with_people, company)
 
     # ─────────────────────────────────────────────────────────────────────────
     # STEP 4 — Company enrichment (gap-filling)

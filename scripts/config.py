@@ -11,7 +11,7 @@ OLLAMA_TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT", 600))
 
 TAVILY_API_KEY        = os.getenv("TAVILY_API_KEY")
 MAX_RESULTS_PER_QUERY = int(os.getenv("MAX_RESULTS_PER_QUERY", 10))
-MAX_CONTEXT           = int(os.getenv("MAX_CONTEXT", 160_000))
+MAX_CONTEXT           = int(os.getenv("MAX_CONTEXT", 120_000))
 
 if not TAVILY_API_KEY:
     sys.exit("[fatal] TAVILY_API_KEY is not set in .env")
