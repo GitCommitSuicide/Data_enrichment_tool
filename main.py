@@ -20,7 +20,7 @@ from scripts.config import OLLAMA_URL, OLLAMA_MODEL
 from scripts.extractor import check_ollama, extract
 from scripts.search import gather
 from scripts.cleaner import clean_output
-from scripts.validator import validate_all_people
+# from scripts.validator import validate_all_people
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -174,7 +174,7 @@ def main() -> None:
     print(f"  Gathered {len(all_urls)} sources in {time.time()-t0:.1f}s")
 
     tavily_data: dict = {"urls": all_urls, "text_length": len(research_text)}
-    _save(tavily_data, os.path.join(OUTPUT_DIR, f"{slug}_tavily.json"))
+    # _save(tavily_data, os.path.join(OUTPUT_DIR, f"{slug}_tavily.json"))
 
     if not research_text:
         sys.exit("[error] No research data gathered — all queries returned empty.")
@@ -191,7 +191,7 @@ def main() -> None:
         sys.exit("[error] LLM extraction failed — got empty result.")
 
     extracted_data = clean_output(extracted_data)
-    _save(extracted_data, os.path.join(OUTPUT_DIR, f"{slug}_extracted.json"))
+    # _save(extracted_data, os.path.join(OUTPUT_DIR, f"{slug}_extracted.json"))
 
     # ─────────────────────────────────────────────────────────────────────────
     # STEP 3 — People enrichment
@@ -216,7 +216,7 @@ def main() -> None:
             if src not in people_data["sources"]:
                 people_data["sources"].append(src)
 
-    _save(people_data, os.path.join(OUTPUT_DIR, f"{slug}_people.json"))
+    # _save(people_data, os.path.join(OUTPUT_DIR, f"{slug}_people.json"))
 
     # Merge people results back into working copy
     extracted_with_people = _merge_people_into_data(copy.deepcopy(extracted_data), people_data)
@@ -224,8 +224,8 @@ def main() -> None:
     # ─────────────────────────────────────────────────────────────────────────
     # STEP 3.5 — LinkedIn cross-validation
     # ─────────────────────────────────────────────────────────────────────────
-    print(f"\n{'─'*60}\nSTEP 3.5 — LinkedIn validation\n{'─'*60}")
-    extracted_with_people = validate_all_people(extracted_with_people, company)
+    # print(f"\n{'─'*60}\nSTEP 3.5 — LinkedIn validation\n{'─'*60}")
+    # extracted_with_people = validate_all_people(extracted_with_people, company)
 
     # ─────────────────────────────────────────────────────────────────────────
     # STEP 4 — Company enrichment (gap-filling)
@@ -251,10 +251,10 @@ def main() -> None:
     print(f"\n{'═'*60}")
     print(f"  ✅  Pipeline complete for: {company}")
     print(f"{'═'*60}")
-    print(f"  📄  Tavily raw    → {slug}_tavily.json    ({len(all_urls)} URLs)")
-    print(f"  📄  Extracted     → {slug}_extracted.json")
-    print(f"  📄  People        → {slug}_people.json    ({len(people_data['leadership'])} leaders)")
-    print(f"  📄  Enriched      → {slug}_enriched.json  ({len(enriched_data.get('sources',[]))} sources)")
+    # print(f"  📄  Tavily raw    → {slug}_tavily.json    ({len(all_urls)} URLs)")
+    # print(f"  📄  Extracted     → {slug}_extracted.json")
+    # print(f"  📄  People        → {slug}_people.json    ({len(people_data['leadership'])} leaders)")
+    # print(f"  📄  Enriched      → {slug}_enriched.json  ({len(enriched_data.get('sources',[]))} sources)")
     print(f"  📄  Final         → {slug}_final.json     ← combined output")
     print(f"{'═'*60}\n")
 
@@ -264,4 +264,4 @@ if __name__ == "__main__":
     start = time.time()
     main()
     end = time.time()
-    print(f"Total time: {end - start:.2f} seconds")
+    print(f"Total time: {(end - start)/60} minutes")
