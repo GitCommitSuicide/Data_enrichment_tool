@@ -8,58 +8,70 @@ from .search import fetch, scrape_url
 from .extractor import call_ollama
 
 _RESULTS_PER_QUERY = 5
-_MAX_SOURCES       = 10
+_MAX_SOURCES       = 12
 _SCRAPE_CAP        = 10_000
 
 _EMPTY = frozenset(["", "...", "not specified", "n/a", "unknown", "none", "null", "not available"])
 
 _QUERY_PROMPT = """\
-You are a senior OSINT analyst.
-Given what we know about a company and its data gaps, produce exactly 5 targeted search queries
-to fill the most critical missing fields.
+You are a senior OSINT analyst generating targeted search queries to fill intelligence gaps about a company.
+Given what we know and what is missing, produce exactly 6 targeted search queries.
 
 Prioritise gaps in this order:
-1. Legal registration numbers (company_number, CIN, GSTIN) — if missing
-2. Financial data (revenue, funding, valuation)
-3. Recent news and developments (2024-2025)
-4. LinkedIn URLs for leaders missing them
-5. Subsidiaries, group companies, certifications
+1. Legal registration numbers (CIN, GSTIN, company_number) — if missing
+2. Financial data (revenue, funding, valuation, growth rates)
+3. Recent news and developments (2024-2026)
+4. Leadership & Management Team (CEO, founders, directors, VP) and their LinkedIn URLs
+5. Subsidiaries, group companies, certifications, partnerships
+6. Company description depth (clients, awards, government contracts, key projects)
 
-Return ONLY a JSON array of 5 strings. No markdown, no explanation.
+Return ONLY a JSON array of 6 strings. No markdown, no explanation, no other keys.
 """
 
 _EXTRACT_PROMPT = """\
-You are an intelligence extraction specialist.
-Extract every useful fact from the raw web content about "{company}" into a JSON object.
+You are an intelligence extraction specialist focused on company data.
+Extract ONLY verified facts about "{company}" from the raw web content below.
 
-Focus on:
-- Legal registration numbers (company_number, CIN, GSTIN, PAN)
-- Financial data (revenue, funding, valuation)
-- Recent news and announcements (2024-2025)
-- Leadership LinkedIn URLs
-- Subsidiaries and group companies
-- Awards, certifications, reviews
+CRITICAL ANTI-HALLUCINATION RULES:
+- ONLY extract facts explicitly stated in this content. Never infer or invent.
+- If a fact is not clearly about "{company}", skip it.
+- Do NOT use training memory. Only use what is in the content.
 
-Use descriptive snake_case keys. Return valid JSON only. If no useful data, return {}.
+Focus on extracting:
+- Legal registration numbers (CIN, GSTIN, PAN, company_number)
+- Financial data (revenue, funding, valuation, capital, growth rates)
+- Recent news and announcements (2024-2026)
+- Leadership LinkedIn profile URLs
+- Subsidiaries, group companies, sister companies
+- Awards, certifications (ISO, CMMI etc.), government partnerships
+- Products and services with descriptions
+- Technology stack, cloud providers, development methodologies
+- Client names or verticals
+- Employee count, headcount growth
+- Reviews and ratings from Glassdoor, AmbitionBox, G2 etc.
+
+Use descriptive snake_case keys matching the company intelligence schema.
+Return valid JSON only. If no useful data about "{company}" found, return {}.
 """
 
 _MERGE_PROMPT = """\
-You are a data-fusion analyst.
-Merge all enrichment fragments into the original company JSON.
+You are a data-fusion analyst merging enrichment fragments into a master company intelligence record.
 
 RULES:
-- Fill gaps where original has missing/empty values
-- NEVER overwrite existing real values
-- Source priority: government registry > official site > LinkedIn > news
-- Deduplicate all lists
-- company_number (UK, 8 chars) vs cin_number (India, 21 chars) — keep both if present, never confuse
-- Subsidiaries: list ALL found group/sister companies
-- recent_news_and_updates: include ALL news items found (2024-2026 priority)
-- key_achievements: include ALL milestones found
-- Remove duplicate keys (e.g. if both "title" and "current_title" exist, keep only "current_title")
-- Do NOT include employee-level info in leadership unless they are director/C-suite
-- Include "sources" array with all unique URLs
-- Output valid JSON only — starts with { ends with }
+- Fill gaps where original has missing/empty/null values — never overwrite existing real values.
+- Source priority: government registry > official site > LinkedIn > news > other.
+- Deduplicate all lists — remove exact duplicates.
+- company_number (UK, 8 chars) vs cin_number (India, 21 chars) — keep both if present, never confuse them.
+- Subsidiaries: list ALL found group/sister companies from all fragments.
+- recent_news_and_updates: include ALL news items found (2023-2026 priority), deduplicated by title.
+- key_achievements: include ALL milestones found from all fragments, deduplicated.
+- leadership: ONLY director/C-suite level people. Each person should have ONLY their current active roles (up to 3) in the experience array — NO experience history, NO education, NO past employers.
+- target_person: ONLY update if the target person is explicitly confirmed in the fragment. NEVER overwrite existing verified target_person data. Preserve all existing target_person fields.
+- Do NOT add "current_title" field — use only "title" for all people.
+- Remove any placeholder values like "...", "N/A", "unknown", "None" from the output.
+- Include "sources" array with all unique URLs from all sources.
+- company.description: if fragments contain more detail, expand to 8-10 sentences covering: business model, products/services, clients/verticals, founding history, geographies, technology, financials, achievements, culture, future direction.
+- Output valid JSON only — starts with { ends with }. No markdown.
 """
 
 
@@ -93,18 +105,22 @@ def _generate_queries(data: dict) -> list[str]:
     co       = data.get("company", {})
     leaders  = data.get("leadership", [])
     name     = co.get("name", "?")
+    city     = co.get("headquarters", {}).get("city", "")
+    website  = co.get("website", "")
 
     missing_li = [l.get("name", "?") for l in leaders if not l.get("linkedin_url")]
     missing_reg = []
     if not co.get("company_number") and not co.get("cin_number"):
         missing_reg.append("registration number")
+    if not co.get("gstin"):
+        missing_reg.append("GSTIN")
 
-    summary  = f"Company: {name}\nHQ: {co.get('headquarters',{}).get('city','?')}\n"
+    summary  = f"Company: {name}\nWebsite: {website}\nHQ: {city}\n"
     if missing_reg:
-        summary += f"MISSING: {', '.join(missing_reg)}\n"
+        summary += f"MISSING registration: {', '.join(missing_reg)}\n"
     if missing_li:
         summary += f"MISSING LinkedIn for: {', '.join(missing_li[:5])}\n"
-    summary += f"Gaps ({len(gaps)}): {', '.join(gaps[:30])}"
+    summary += f"Gaps ({len(gaps)}): {', '.join(gaps[:40])}"
 
     print(f"  [enricher] {len(gaps)} gaps found — generating queries …")
     raw = call_ollama(_QUERY_PROMPT, summary)
@@ -119,14 +135,15 @@ def _generate_queries(data: dict) -> list[str]:
 
     if not isinstance(raw, list):
         raw = [
-            f'"{name}" (revenue OR funding OR valuation)',
-            f'"{name}" "company number" OR "registration" site:companieshouse.gov.uk OR site:find-and-update.company-information.service.gov.uk',
-            f'"{name}" news OR announcement OR launch 2024 OR 2025',
-            f'"{name}" CEO OR founder OR director site:linkedin.com/in',
-            f'"{name}" subsidiaries OR "group companies" OR certifications OR awards',
+            f'"{name}" revenue OR funding OR valuation 2024 OR 2025',
+            f'"{name}" CIN OR GSTIN OR "company registration" site:tofler.in OR site:zaubacorp.com OR site:mca.gov.in',
+            f'"{name}" news OR announcement OR launch OR partnership 2024 OR 2025 OR 2026',
+            f'"{name}" CEO OR founder OR director OR "management team" OR "leadership" site:linkedin.com/in OR site:theorg.com',
+            f'"{name}" subsidiaries OR "group companies" OR certifications OR awards OR government',
+            f'"{name}" clients OR customers OR "case study" OR reviews OR Glassdoor OR AmbitionBox',
         ]
 
-    queries = [str(q).strip() for q in raw if q][:5]
+    queries = [str(q).strip() for q in raw if q][:6]
     for i, q in enumerate(queries, 1):
         print(f"    Q{i}: {q[:100]}")
     return queries

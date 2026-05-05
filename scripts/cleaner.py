@@ -82,9 +82,20 @@ def _strip_recursive(obj: Any) -> Any:
 
 
 def _strip_education_from_leaders(data: dict) -> dict:
-    """Remove education from leadership entries — keep only on target_person."""
+    """Remove education and skills from leadership entries, but keep up to 3 current roles in experience."""
     for leader in data.get("leadership", []):
         leader.pop("education", None)
+        leader.pop("skills", None)
+        leader.pop("CONDITION", None)
+        leader.pop("current_title", None)
+        
+        # Keep only current experience
+        if "experience" in leader and isinstance(leader["experience"], list):
+            current_roles = [exp for exp in leader["experience"] if isinstance(exp, dict) and exp.get("is_current")]
+            if current_roles:
+                leader["experience"] = current_roles[:3]
+            else:
+                leader.pop("experience")
     return data
 
 
@@ -152,16 +163,28 @@ def clean_output(data: dict) -> dict:
     """Strip bloat, cap lists, remove placeholder values, normalise schema."""
     data = _strip_recursive(data)
 
-    # Cap products to 5
+    # Remove any CONDITION placeholder the LLM echoed in target_person
+    tp = data.get("target_person", {})
+    if isinstance(tp, dict):
+        tp.pop("CONDITION", None)
+        tp.pop("current_title", None) if "title" in tp else None
+        # If target_person has no meaningful data beyond name, remove it
+        meaningful_keys = set(tp.keys()) - {"name", "sources"}
+        if not meaningful_keys:
+            data.pop("target_person", None)
+        else:
+            data["target_person"] = tp
+
+    # Cap products to 7
     if isinstance(data.get("products_and_services"), list):
-        data["products_and_services"] = data["products_and_services"][:5]
+        data["products_and_services"] = data["products_and_services"][:7]
 
     # Cap competitors to 5
     mi = data.get("market_intelligence", {})
     if isinstance(mi.get("key_competitors"), list):
         mi["key_competitors"] = mi["key_competitors"][:5]
 
-    # Leadership cleanup
+    # Leadership cleanup: strip experience, education, skills — decision makers only
     data = _strip_education_from_leaders(data)
     data = _deduplicate_title_fields(data)
 
